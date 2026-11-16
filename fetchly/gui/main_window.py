@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import os
-import subprocess
+import sys
 from pathlib import Path
 
 from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer, QUrl
@@ -14,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..engine import DEFAULT_CONNECTIONS, DownloadManager, DownloadSnapshot, Status
-from ..util import default_download_dir, human_speed
+from ..util import default_download_dir, human_speed, reveal_in_file_manager
 from . import icons
 from .dialogs import AddUrlDialog, SettingsDialog
 from .model import DownloadModel, NameDelegate
@@ -290,7 +289,7 @@ class MainWindow(QMainWindow):
         s = snaps[0]
         p = self._final_path(s)
         if s.status == Status.COMPLETED and p and p.exists():
-            os.startfile(str(p))
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(p)))
         else:
             self.open_folder()
 
@@ -300,10 +299,9 @@ class MainWindow(QMainWindow):
             return
         s = snaps[0]
         p = self._final_path(s)
-        if s.status == Status.COMPLETED and p and p.exists():
-            subprocess.Popen(["explorer", "/select,", str(p)])
-        else:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(s.folder))
+        if s.status == Status.COMPLETED and p and p.exists() and reveal_in_file_manager(p):
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(s.folder))
 
     def copy_link(self):
         snaps = self.selected_snapshots()
@@ -353,7 +351,9 @@ class MainWindow(QMainWindow):
             e.ignore()
             self.hide()
             self.tray.showMessage("Fetchly is still downloading",
-                                  "Downloads continue in the background. Right-click the tray icon to quit.",
+                                  "Downloads continue in the background. "
+                                  + ("Use the Fetchly menu bar icon to quit." if sys.platform == "darwin"
+                                     else "Right-click the tray icon to quit."),
                                   icons.app_icon(), 4000)
             return
         self._quitting = True

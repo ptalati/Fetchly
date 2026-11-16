@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Fetchly
+Comment=Fast multi-connection download manager
+Exec=Fetchly
+Icon=fetchly
+Categories=Network;FileTransfer;

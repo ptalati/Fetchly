@@ -20,6 +20,7 @@ import httpx
 from .models import DownloadRecord, DownloadSnapshot, Segment, SegmentView, Status
 from .probe import ProbeError, ProbeResult, probe, unique_path
 from .store import Store
+from .prealloc import preallocate
 
 MAX_CONNECTIONS = 16
 DEFAULT_CONNECTIONS = 8
@@ -165,7 +166,7 @@ class Download:
             info = await self._with_retry(lambda: probe(client, rec.url))
             self._url = info.final_url
             self._prepare(info)
-            self._open_file()
+            await asyncio.to_thread(self._open_file)  # allocation can be slow off NTFS
             self._set_status(Status.DOWNLOADING)
 
             n_workers = rec.connections if rec.resumable else 1
@@ -332,7 +333,7 @@ class Download:
         if self.rec.size is not None and self.rec.resumable:
             self._fh.seek(0, os.SEEK_END)
             if self._fh.tell() != self.rec.size:
-                self._fh.truncate(self.rec.size)  # pre-allocate
+                preallocate(self._fh, self.rec.size)
 
     def _write(self, offset: int, data: bytes) -> None:
         self._fh.seek(offset)

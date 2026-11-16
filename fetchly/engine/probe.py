@@ -98,6 +98,9 @@ def unique_path(folder: str | Path, filename: str, also_avoid_suffix: str = ".pa
     """Return folder/filename, or 'name (1).ext' etc. if it (or its .part) already exists."""
     folder = Path(folder)
     stem, ext = os.path.splitext(filename)
+    stem2, ext2 = os.path.splitext(stem)
+    if ext2.lower() == ".tar":  # keep 'name (1).tar.gz', not 'name.tar (1).gz'
+        stem, ext = stem2, ext2 + ext
     candidate = folder / filename
     n = 1
     while candidate.exists() or (also_avoid_suffix and Path(str(candidate) + also_avoid_suffix).exists()):
