@@ -154,3 +154,57 @@ def test_flags_and_watch_toggle(window):
     assert window.clipboard_watcher.enabled is False and window.flag("watch_clipboard", True) is False
     window.set_flag("browser_confirm", False)
     assert window.flag("browser_confirm", True) is False
+
+
+def test_browser_add_ignores_repeats(window, monkeypatch):
+    opened = []
+    monkeypatch.setattr(window, "add_url", lambda url=None, headers=None, show_main=True: opened.append(url))
+    msg = {"url": "http://x.test/dup.zip", "referrer": "http://x.test/"}
+    window.on_browser_add(msg)
+    window.on_browser_add(dict(msg))  # the same click delivered twice
+    assert opened == ["http://x.test/dup.zip"]
+
+    import fetchly.gui.main_window as mw
+
+    real = mw.time.monotonic
+    monkeypatch.setattr(mw.time, "monotonic", lambda: real() + mw.BROWSER_DEDUPE_SECONDS + 1)
+    window.on_browser_add(dict(msg))  # deliberately downloaded again later
+    assert opened == ["http://x.test/dup.zip"] * 2
+
+
+def test_browser_add_queued_while_dialog_open(window, monkeypatch):
+    opened = []
+    monkeypatch.setattr(window, "add_url", lambda url=None, headers=None, show_main=True: opened.append(url))
+    window._add_dialog_open = True
+    window.on_browser_add({"url": "http://x.test/q.zip"})
+    window.on_browser_add({"url": "http://x.test/q.zip"})
+    assert len(window._pending_adds) == 1 and opened == []
+    window._add_dialog_open = False
+    window._run_pending_add()
+    assert opened == ["http://x.test/q.zip"]
+
+
+def test_add_is_acknowledged_before_the_slot_runs(qapp):
+    """A slot that blocks (the modal Add dialog) must not delay the reply past the sender's timeout."""
+    import time
+
+    from fetchly.gui.single_instance import InstanceServer
+
+    name = f"fetchly-test-ackfirst-{os.getpid()}"
+    server = InstanceServer(name)
+    assert server.listen()
+    seen = []
+
+    def slow_slot(msg):
+        seen.append(msg["url"])
+        end = time.monotonic() + 4  # longer than send_to_running's 1.5s timeout
+        while time.monotonic() < end:
+            qapp.processEvents()
+            time.sleep(0.01)
+
+    server.addRequested.connect(slow_slot)
+    try:
+        assert run_blocking(qapp, lambda: hand_off_from_other_process(["http://x.test/slow.zip"], name)) is True
+    finally:
+        server.close()
+    assert seen == ["http://x.test/slow.zip"]

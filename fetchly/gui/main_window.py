@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer, QUrl
@@ -23,6 +24,7 @@ from .taskbar import TaskbarProgress, overall
 from .widgets import DetailPanel, HeaderBar, Sidebar
 
 REFRESH_MS = 500
+BROWSER_DEDUPE_SECONDS = 15  # the same link from the browser again within this window is ignored
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +39,7 @@ class MainWindow(QMainWindow):
         self._notify_folder: str | None = None
         self._add_dialog_open = False
         self._pending_adds: list[dict] = []
+        self._recent_browser_urls: dict[str, float] = {}  # url -> time.monotonic() when received
         self.add_dialog: AddUrlDialog | None = None
 
         self.header = HeaderBar()
@@ -294,6 +297,14 @@ class MainWindow(QMainWindow):
         url = msg.get("url")
         if not isinstance(url, str) or not url:
             return
+        if not msg.get("_queued"):
+            # One click can reach us twice (browser retries, a resent hand-off): drop repeats.
+            now = time.monotonic()
+            self._recent_browser_urls = {u: t for u, t in self._recent_browser_urls.items()
+                                         if now - t < BROWSER_DEDUPE_SECONDS}
+            if url in self._recent_browser_urls:
+                return
+            self._recent_browser_urls[url] = now
         headers = msg.get("headers")
         headers = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) and headers else {}
         referrer = msg.get("referrer")
@@ -301,7 +312,7 @@ class MainWindow(QMainWindow):
             headers = {"Referer": referrer}
         if self.flag("browser_confirm", True):
             if self._add_dialog_open:
-                self._pending_adds.append(msg)
+                self._pending_adds.append({**msg, "_queued": True})
                 return
             self.add_url(url, headers=headers, show_main=False)
             return

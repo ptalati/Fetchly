@@ -105,20 +105,21 @@ class InstanceServer(QObject):
             self._reply(sock, {"ok": False, "error": "message must be an object"})
             return
         cmd = msg.get("cmd")
-        if cmd == "ping":
-            pass  # liveness check from the native host; nothing to signal
-        elif cmd == "show":
-            self.showRequested.emit()
-        elif cmd == "add":
+        if cmd == "add":
             url = msg.get("url")
             if not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
                 self._reply(sock, {"ok": False, "error": "missing or unsupported url"})
                 return
-            self.addRequested.emit(msg)
-        else:
+        elif cmd not in ("ping", "show"):
             self._reply(sock, {"ok": False, "error": f"unknown cmd {cmd!r}"})
             return
+        # Acknowledge before signalling: a slot may open a modal dialog, and a sender that waits
+        # longer than its timeout would assume Fetchly is not running and send the link again.
         self._reply(sock, {"ok": True})
+        if cmd == "show":
+            self.showRequested.emit()
+        elif cmd == "add":
+            self.addRequested.emit(msg)
 
     @staticmethod
     def _reply(sock: QLocalSocket | None, obj: dict) -> None:
