@@ -16,7 +16,7 @@ import json
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 MAX_MESSAGE_BYTES = 1024 * 1024  # a request with a big Cookie header is still far below this
@@ -116,10 +116,12 @@ class InstanceServer(QObject):
         # Acknowledge before signalling: a slot may open a modal dialog, and a sender that waits
         # longer than its timeout would assume Fetchly is not running and send the link again.
         self._reply(sock, {"ok": True})
+        # Signal from the event loop, not from inside this socket's handler: the slot may run a
+        # nested loop (the Add dialog) in which the socket disconnects and is deleted under us.
         if cmd == "show":
-            self.showRequested.emit()
+            QTimer.singleShot(0, self.showRequested.emit)
         elif cmd == "add":
-            self.addRequested.emit(msg)
+            QTimer.singleShot(0, lambda: self.addRequested.emit(msg))
 
     @staticmethod
     def _reply(sock: QLocalSocket | None, obj: dict) -> None:

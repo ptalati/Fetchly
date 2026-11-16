@@ -8,6 +8,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -338,6 +339,10 @@ def run_blocking(qapp, fn, timeout_ms=15000):
     QTimer.singleShot(timeout_ms, loop.quit)
     loop.exec()
     t.join(1)
+    # Deliver signals the server queued for the event loop (it acknowledges first, then signals).
+    for _ in range(20):
+        qapp.processEvents()
+        time.sleep(0.005)
     return result.get("value")
 
 

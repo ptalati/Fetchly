@@ -195,9 +195,9 @@ def test_add_is_acknowledged_before_the_slot_runs(qapp):
     assert server.listen()
     seen = []
 
-    def slow_slot(msg):
+    def slow_slot(msg):  # like the modal Add dialog: a nested event loop that outlives the sender's timeout
         seen.append(msg["url"])
-        end = time.monotonic() + 4  # longer than send_to_running's 1.5s timeout
+        end = time.monotonic() + 4
         while time.monotonic() < end:
             qapp.processEvents()
             time.sleep(0.01)
@@ -205,6 +205,10 @@ def test_add_is_acknowledged_before_the_slot_runs(qapp):
     server.addRequested.connect(slow_slot)
     try:
         assert run_blocking(qapp, lambda: hand_off_from_other_process(["http://x.test/slow.zip"], name)) is True
+        end = time.monotonic() + 10
+        while not seen and time.monotonic() < end:
+            qapp.processEvents()
+            time.sleep(0.01)
     finally:
         server.close()
     assert seen == ["http://x.test/slow.zip"]
