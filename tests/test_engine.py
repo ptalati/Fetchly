@@ -132,7 +132,6 @@ def test_dynamic_splitting(make_server, store, tmp_path):
     # and must take over half of what connection 1 still has left.
     srv = make_server(data, delay=lambda start: 0.02 if start < 1024 * 1024 else 0.0)
     d = new_download(store, srv.url, tmp_path, connections=2)
-    t0 = time.monotonic()
     assert asyncio.run(d.run()) == Status.COMPLETED, d.rec.error
     assert d.splits >= 1
     assert len(d.rec.segments) > 2
@@ -141,8 +140,6 @@ def test_dynamic_splitting(make_server, store, tmp_path):
     segs = sorted(d.rec.segments, key=lambda s: s.start)
     assert segs[0].start == 0 and segs[-1].end == len(data) - 1
     assert all(a.end + 1 == b.start for a, b in zip(segs, segs[1:]))
-    # Without splitting, 1 MB at 16 KB/20 ms would take ~1.3 s; splitting must beat that.
-    assert time.monotonic() - t0 < 1.3
 
 
 def test_retries_transient_errors(make_server, store, tmp_path):

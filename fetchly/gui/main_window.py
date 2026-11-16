@@ -9,15 +9,16 @@ from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QHeaderView, QLabel, QMainWindow, QMenu, QMessageBox,
-    QSizePolicy, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget, QHBoxLayout,
+    QSizePolicy, QSystemTrayIcon, QTableView, QToolBar, QVBoxLayout, QWidget, QHBoxLayout,
 )
 
 from ..engine import DEFAULT_CONNECTIONS, DownloadManager, DownloadSnapshot, Status
 from ..util import default_download_dir, human_speed, reveal_in_file_manager
 from . import icons
 from .dialogs import AddUrlDialog, SettingsDialog
-from .model import DownloadModel, NameDelegate
-from .widgets import DetailPanel, Sidebar
+from .model import DownloadModel, NameDelegate, TextDelegate
+from .taskbar import TaskbarProgress, overall
+from .widgets import DetailPanel, HeaderBar, Sidebar
 
 REFRESH_MS = 500
 
@@ -33,11 +34,14 @@ class MainWindow(QMainWindow):
         self._last_status: dict[int, Status] = {}
         self._notify_folder: str | None = None
 
+        self.header = HeaderBar()
+        self.setMenuWidget(self.header)
         self._build_toolbar()
         self._build_body()
         self._build_tray()
         self._build_statusbar()
 
+        self.taskbar = TaskbarProgress()
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(REFRESH_MS)
@@ -66,13 +70,16 @@ class MainWindow(QMainWindow):
         self.act_settings = QAction(icons.settings_icon(), "Settings", self, triggered=self.open_settings)
         tb.addAction(self.act_add)
         tb.widgetForAction(self.act_add).setObjectName("primary")
-        tb.addSeparator()
         for a in (self.act_resume, self.act_pause, self.act_remove):
             tb.addAction(a)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         tb.addWidget(spacer)
         tb.addAction(self.act_settings)
+        sb = tb.widgetForAction(self.act_settings)
+        sb.setObjectName("iconOnly")
+        sb.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        sb.setToolTip("Settings")
 
     def _build_body(self):
         self.sidebar = Sidebar()
@@ -81,20 +88,21 @@ class MainWindow(QMainWindow):
         self.model = DownloadModel(self)
         self.table = QTableView()
         self.table.setModel(self.model)
+        self.table.setItemDelegate(TextDelegate(self.table))
         self.table.setItemDelegateForColumn(0, NameDelegate(self.table))
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setShowGrid(False)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.verticalHeader().hide()
-        self.table.verticalHeader().setDefaultSectionSize(46)
+        self.table.verticalHeader().setDefaultSectionSize(50)
         self.table.setWordWrap(False)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._context_menu)
         self.table.doubleClicked.connect(lambda _i: self.open_file())
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Stretch)
-        for col, w in ((1, 170), (2, 110), (3, 110), (4, 100)):
+        for col, w in ((1, 90), (2, 100), (3, 80)):
             h.setSectionResizeMode(col, QHeaderView.Fixed)
             self.table.setColumnWidth(col, w)
         h.setHighlightSections(False)
@@ -102,13 +110,12 @@ class MainWindow(QMainWindow):
 
         self.detail = DetailPanel()
 
-        right = QSplitter(Qt.Vertical)
-        right.addWidget(self.table)
-        right.addWidget(self.detail)
-        right.setStretchFactor(0, 3)
-        right.setStretchFactor(1, 2)
-        right.setHandleWidth(1)
-        right.setSizes([470, 260])
+        right = QWidget()
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.setSpacing(0)
+        rl.addWidget(self.table, 1)
+        rl.addWidget(self.detail)
 
         central = QWidget()
         lay = QHBoxLayout(central)
@@ -156,7 +163,9 @@ class MainWindow(QMainWindow):
         done = sum(1 for s in snaps if s.status == Status.COMPLETED)
         self.status_left.setText(f"{len(running)} active  -  {done} finished  -  {len(snaps)} total")
         self.status_right.setText(f"Total speed {human_speed(total)}" if running else "Idle")
+        self.header.set_speed(human_speed(total) if running and total > 0 else None)
         self.tray.setToolTip(f"Fetchly - {len(running)} active, {human_speed(total)}" if running else "Fetchly")
+        self.taskbar.update(int(self.winId()), *overall(snaps))
 
     def _notify_completions(self, snaps: list[DownloadSnapshot]):
         for s in snaps:

@@ -1,4 +1,4 @@
-"""Table model for the download list, its filters, and the progress-bar delegate."""
+"""Table model for the download list, its filters, and the row delegates."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QStyle, QStyledItemDelegate
 from ..engine import DownloadSnapshot, Status
 from ..util import human_eta, human_size, human_speed
 from . import theme
+from .icons import paint_glyph
 
 CATEGORIES: dict[str, set[str]] = {
     "Video": {"mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "ts"},
@@ -19,6 +20,9 @@ CATEGORIES: dict[str, set[str]] = {
     "Documents": {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "rtf", "odt", "ods",
                   "csv", "epub", "md"},
 }
+
+CATEGORY_GLYPH = {"Video": "film", "Archives": "archive", "Programs": "window", "Documents": "filetext"}
+CATEGORY_COLOR = {"Video": "#A78BFA", "Archives": theme.AMBER, "Programs": theme.GREEN, "Documents": "#60A5FA"}
 
 STATUS_FILTERS = {
     "All": lambda s: True,
@@ -56,7 +60,7 @@ def display_name(snap: DownloadSnapshot) -> str:
     return snap.filename or snap.url
 
 
-COLUMNS = ["Name", "Size", "Status", "Speed", "Time left"]
+COLUMNS = ["Name", "Size", "Speed", "Left"]
 SnapRole = Qt.UserRole + 1
 
 
@@ -74,9 +78,9 @@ class DownloadModel(QAbstractTableModel):
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return COLUMNS[section].upper()
+            return COLUMNS[section]
         if orientation == Qt.Horizontal and role == Qt.TextAlignmentRole:
-            return int(Qt.AlignLeft | Qt.AlignVCenter) if section == 0 else int(Qt.AlignRight | Qt.AlignVCenter)
+            return int(Qt.AlignLeft | Qt.AlignVCenter)
         return None
 
     def data(self, index, role=Qt.DisplayRole):
@@ -90,30 +94,25 @@ class DownloadModel(QAbstractTableModel):
             if col == 0:
                 return display_name(s)
             if col == 1:
-                if s.size and s.status != Status.COMPLETED:
-                    return f"{human_size(s.downloaded)} / {human_size(s.size)}"
                 return human_size(s.size if s.size else s.downloaded or None)
             if col == 2:
-                if s.status == Status.DOWNLOADING and s.progress is not None:
-                    return f"{s.progress * 100:.0f}%"
-                return STATUS_TEXT[s.status]
+                return human_speed(s.speed) if s.status.is_running else STATUS_TEXT[s.status]
             if col == 3:
-                return human_speed(s.speed) if s.status.is_running else ""
-            if col == 4:
-                return human_eta(s.eta) if s.status.is_running else ""
-        if role == Qt.TextAlignmentRole and col > 0:
-            return int(Qt.AlignRight | Qt.AlignVCenter)
+                return human_eta(s.eta) if s.status.is_running else "-"
+        if role == Qt.TextAlignmentRole:
+            return int(Qt.AlignLeft | Qt.AlignVCenter)
         if role == Qt.ForegroundRole:
-            if col == 2 and s.status == Status.ERROR:
-                return QColor(theme.RED)
-            if col == 2 and s.status == Status.COMPLETED:
-                return QColor(theme.CYAN)
-            if col == 3 and s.status.is_running:
-                return QColor(theme.CYAN)
-            if col > 0:
-                return QColor(theme.MUTED) if col != 3 else None
+            if col == 2:
+                if s.status == Status.ERROR:
+                    return QColor(theme.RED)
+                if s.status == Status.COMPLETED:
+                    return QColor(theme.GREEN)
+                if not s.status.is_running:
+                    return QColor(theme.MUTED)
+            if col == 3 and not s.status.is_running:
+                return QColor(theme.MUTED)
         if role == Qt.ToolTipRole:
-            return s.error if s.status == Status.ERROR else s.url
+            return s.error if s.status == Status.ERROR and s.error else s.url
         return None
 
     def snapshot_at(self, row: int) -> DownloadSnapshot | None:
@@ -140,6 +139,8 @@ class DownloadModel(QAbstractTableModel):
 
 
 def _bar_gradient(rect: QRectF, status: Status) -> QLinearGradient | QColor:
+    if status == Status.COMPLETED:
+        return QColor(theme.GREEN)
     if status == Status.ERROR:
         return QColor(theme.RED)
     if status in (Status.PAUSED, Status.QUEUED):
@@ -150,9 +151,10 @@ def _bar_gradient(rect: QRectF, status: Status) -> QLinearGradient | QColor:
     return g
 
 
-def paint_bar(p: QPainter, rect: QRectF, fraction: float | None, status: Status, radius: float = 2.5) -> None:
+def paint_bar(p: QPainter, rect: QRectF, fraction: float | None, status: Status, radius: float = 2.5,
+              track: str = theme.TRACK) -> None:
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(theme.TRACK))
+    p.setBrush(QColor(track))
     p.drawRoundedRect(rect, radius, radius)
     if fraction is None:
         return
@@ -164,8 +166,26 @@ def paint_bar(p: QPainter, rect: QRectF, fraction: float | None, status: Status,
     p.drawRoundedRect(fill, radius, radius)
 
 
+def _row_border(p: QPainter, option) -> None:
+    p.setPen(QPen(QColor("#162A4D"), 1))
+    y = option.rect.bottom()
+    p.drawLine(option.rect.left(), y, option.rect.right(), y)
+
+
+class TextDelegate(QStyledItemDelegate):
+    """Plain cell text plus the thin row divider."""
+
+    def paint(self, p: QPainter, option, index):
+        super().paint(p, option, index)
+        p.save()
+        _row_border(p, option)
+        p.restore()
+
+
 class NameDelegate(QStyledItemDelegate):
-    """File name on top, a slim progress bar underneath."""
+    """File-type glyph and name on top, a 5px progress bar underneath."""
+
+    GLYPH = 16
 
     def paint(self, p: QPainter, option, index):
         s: DownloadSnapshot = index.data(SnapRole)
@@ -175,16 +195,22 @@ class NameDelegate(QStyledItemDelegate):
         if option.state & QStyle.State_Selected:
             p.fillRect(option.rect, QColor(theme.SURFACE_HI))
         r = QRectF(option.rect).adjusted(12, 7, -12, -8)
+        cat = category_of(s)
+        glyph_rect = QRectF(r.x(), r.y() + 1, self.GLYPH, self.GLYPH)
+        paint_glyph(p, CATEGORY_GLYPH.get(cat, "file"), glyph_rect,
+                    CATEGORY_COLOR.get(cat, theme.MUTED), 1.9)
         f = QFont(option.font)
         f.setWeight(QFont.DemiBold)
         p.setFont(f)
         p.setPen(QPen(QColor(theme.TEXT)))
-        text_rect = QRectF(r.x(), r.y(), r.width(), r.height() - 9)
+        tx = r.x() + self.GLYPH + 8
+        text_rect = QRectF(tx, r.y(), r.right() - tx, self.GLYPH + 2)
         name = p.fontMetrics().elidedText(display_name(s), Qt.ElideMiddle, int(text_rect.width()))
         p.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, name)
-        bar = QRectF(r.x(), r.bottom() - 4, r.width(), 4)
-        paint_bar(p, bar, s.progress if s.status != Status.COMPLETED else 1.0, s.status, 2)
+        bar = QRectF(r.x(), r.bottom() - 5, r.width(), 5)
+        paint_bar(p, bar, s.progress if s.status != Status.COMPLETED else 1.0, s.status, 2.5)
+        _row_border(p, option)
         p.restore()
 
     def sizeHint(self, option, index):
-        return QSize(320, 46)
+        return QSize(320, 50)

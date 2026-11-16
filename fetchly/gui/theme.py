@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from PySide6.QtGui import QColor, QPalette
 from PySide6.QtWidgets import QApplication
+
+RES = (Path(__file__).parent / "resources").as_posix()
 
 NAVY = "#0E1B33"
 SIDEBAR = "#0A1528"
@@ -17,47 +21,65 @@ CYAN = "#67E8F9"
 RED = "#F87171"
 AMBER = "#FBBF24"
 TRACK = "#0A1426"
+GREEN = "#34D399"
 
 QSS = f"""
 * {{ font-family: "Segoe UI", sans-serif; font-size: 10pt; color: {TEXT}; }}
 QMainWindow, QDialog {{ background: {NAVY}; }}
+QFrame#header {{ background: {NAVY}; border: none; border-bottom: 1px solid {BORDER}; }}
+QLabel#appTitle {{ font-weight: 600; font-size: 11pt; }}
+QLabel#totalSpeed {{ color: {MUTED}; }}
 QToolBar {{ background: {NAVY}; border: none; border-bottom: 1px solid {BORDER}; padding: 6px 10px; spacing: 6px; }}
-QToolBar QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 6px;
-    padding: 5px 10px; color: {TEXT}; }}
-QToolBar QToolButton:hover {{ background: {SURFACE_HI}; border-color: {BORDER}; }}
+QToolBar QToolButton {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 6px;
+    padding: 5px 12px 5px 8px; color: {TEXT}; }}
+QToolBar QToolButton:hover {{ background: {SURFACE_HI}; border-color: #34508A; }}
 QToolBar QToolButton:pressed {{ background: {BORDER}; }}
-QToolBar QToolButton:disabled {{ color: #4E628A; }}
-QToolBar QToolButton#primary {{ background: {BLUE}; color: white; font-weight: 600; }}
-QToolBar QToolButton#primary:hover {{ background: #5B95F8; }}
+QToolBar QToolButton:focus {{ border-color: {CYAN}; }}
+QToolBar QToolButton:disabled {{ color: #4E628A; background: transparent; border-color: #1A2D52; }}
+QToolBar QToolButton#primary {{ background: {BLUE}; border-color: {BLUE}; color: white; font-weight: 600; }}
+QToolBar QToolButton#primary:hover {{ background: #5B95F8; border-color: #5B95F8; }}
+QToolBar QToolButton#iconOnly {{ padding: 5px 7px; }}
 
 QTreeWidget#sidebar {{ background: {SIDEBAR}; border: none; border-right: 1px solid {BORDER}; padding: 8px 6px; outline: 0; }}
-QTreeWidget#sidebar::item {{ height: 30px; padding-left: 6px; }}
-QTreeWidget#sidebar::item:last {{ padding-right: 10px; }}
+QTreeWidget#sidebar::item {{ height: 30px; padding-left: 4px; color: {MUTED}; }}
 QTreeWidget#sidebar::item:hover {{ background: {SURFACE}; }}
-QTreeWidget#sidebar::item:selected {{ background: {SURFACE_HI}; color: {CYAN}; }}
+QTreeWidget#sidebar::item:selected {{ background: {SURFACE_HI}; color: {TEXT}; }}
 QTreeWidget#sidebar {{ show-decoration-selected: 1; }}
 
-QTableView {{ background: {NAVY}; alternate-background-color: #10203C; border: none; gridline-color: transparent;
+QTableView {{ background: {NAVY}; border: none; gridline-color: transparent;
     selection-background-color: {SURFACE_HI}; selection-color: {TEXT}; outline: 0; }}
-QTableView::item {{ padding: 0 8px; border: none; }}
+QTableView::item {{ padding: 0 4px; border: none; }}
 QTableView::item:selected {{ background: {SURFACE_HI}; }}
 QHeaderView::section {{ background: {NAVY}; color: {MUTED}; border: none; border-bottom: 1px solid {BORDER};
-    padding: 6px 8px; font-size: 9pt; font-weight: 600; }}
+    padding: 6px 4px; font-size: 9pt; }}
 
 QFrame#detail {{ background: {SIDEBAR}; border-top: 1px solid {BORDER}; }}
-QLabel#detailTitle {{ font-size: 12pt; font-weight: 600; }}
+QLabel#detailTitle {{ font-size: 10.5pt; font-weight: 600; }}
+QLabel#detailPercent {{ color: {CYAN}; font-weight: 600; }}
+QLabel#caption {{ color: {MUTED}; font-size: 9pt; }}
 QLabel.muted, QLabel[muted="true"] {{ color: {MUTED}; }}
 QLabel#sectionLabel {{ color: {MUTED}; font-size: 8.5pt; font-weight: 600; letter-spacing: 1px; }}
 
 QLineEdit, QSpinBox {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 8px;
     selection-background-color: {BLUE}; }}
+QSpinBox {{ padding-right: 26px; }}
+QSpinBox::up-button, QSpinBox::down-button {{ subcontrol-origin: border; width: 22px; background: {SURFACE_HI};
+    border-left: 1px solid {BORDER}; }}
+QSpinBox::up-button {{ subcontrol-position: top right; border-top-right-radius: 6px; border-bottom: 1px solid {BORDER}; }}
+QSpinBox::down-button {{ subcontrol-position: bottom right; border-bottom-right-radius: 6px; }}
+QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: {BORDER}; }}
+QSpinBox::up-arrow {{ image: url("{RES}/chevron-up.svg"); width: 10px; height: 10px; }}
+QSpinBox::down-arrow {{ image: url("{RES}/chevron-down.svg"); width: 10px; height: 10px; }}
+QSpinBox::up-arrow:disabled, QSpinBox::down-arrow:disabled {{ image: none; }}
 QLineEdit:focus, QSpinBox:focus {{ border-color: {BLUE}; }}
 QPushButton {{ background: {SURFACE}; border: 1px solid {BORDER}; border-radius: 6px; padding: 6px 14px; }}
 QPushButton:hover {{ background: {SURFACE_HI}; }}
-QPushButton:default, QPushButton#primary {{ background: {BLUE}; border-color: {BLUE}; color: white; font-weight: 600; }}
-QPushButton:default:hover, QPushButton#primary:hover {{ background: #5B95F8; }}
-QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {BORDER}; border-radius: 3px; background: {SURFACE}; }}
-QCheckBox::indicator:checked {{ background: {BLUE}; border-color: {BLUE}; }}
+QPushButton#primary {{ background: {BLUE}; border-color: {BLUE}; color: white; font-weight: 600; }}
+QPushButton#primary:hover {{ background: #5B95F8; }}
+QCheckBox {{ spacing: 8px; }}
+QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid #3A5590; border-radius: 4px; background: {SURFACE}; }}
+QCheckBox::indicator:hover {{ border-color: {BLUE}; }}
+QCheckBox::indicator:checked {{ background: {BLUE}; border-color: {BLUE}; image: url("{RES}/check.svg"); }}
 
 QScrollArea {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
