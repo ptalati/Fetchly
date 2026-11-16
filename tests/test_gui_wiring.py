@@ -208,3 +208,22 @@ def test_add_is_acknowledged_before_the_slot_runs(qapp):
     finally:
         server.close()
     assert seen == ["http://x.test/slow.zip"]
+
+
+def test_detail_blocks_merge_into_one_bar_when_complete(qapp):
+    from dataclasses import replace
+
+    from fetchly.engine.models import DownloadSnapshot, SegmentView, Status
+    from fetchly.gui.widgets import DetailPanel
+
+    segs = tuple(SegmentView(i * 100, i * 100 + 99, 50, True) for i in range(4))
+    snap = DownloadSnapshot(1, "http://x.test/a.zip", ".", "a.zip", 400, 200, Status.DOWNLOADING, True,
+                            4, 4, 0.0, None, None, 0.0, None, segs)
+    panel = DetailPanel()
+    panel.show_snapshot(snap)
+    assert len(panel.blocks.fractions) == 4 and panel.caption.text() == DetailPanel.CAPTION
+    done = replace(snap, status=Status.COMPLETED, downloaded=400,
+                   segments=tuple(replace(s, downloaded=100, active=False) for s in segs))
+    panel.show_snapshot(done)
+    assert panel.blocks.fractions == [] and panel.caption.text() == DetailPanel.DONE_CAPTION
+    assert panel.percent.text() == "100%"

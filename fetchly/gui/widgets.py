@@ -201,7 +201,9 @@ class SegmentBlocks(QWidget):
 
     def set_snapshot(self, snap: DownloadSnapshot | None) -> None:
         self.snap = snap
-        self.fractions = block_fractions(snap) if snap else []
+        # Finished: the pieces are one file again, so draw one bar (as IDM does).
+        done = snap is not None and snap.status == Status.COMPLETED
+        self.fractions = block_fractions(snap) if snap and not done else []
         self.update()
 
     def paintEvent(self, _e):
@@ -229,6 +231,7 @@ class DetailPanel(QFrame):
     """One compact strip: title and connection summary, the blocks, then caption and percent."""
 
     CAPTION = "Each block is one thread fetching its own byte range"
+    DONE_CAPTION = "Download complete"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -293,6 +296,8 @@ class DetailPanel(QFrame):
         self.blocks.set_snapshot(s)
         if s.status == Status.ERROR and s.error:
             self._set_caption(f"Error: {s.error}", True)
+        elif s.status == Status.COMPLETED:
+            self._set_caption(self.DONE_CAPTION, False)
         else:
             self._set_caption(self.CAPTION, False)
 
