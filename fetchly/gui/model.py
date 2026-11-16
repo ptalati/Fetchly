@@ -22,7 +22,12 @@ CATEGORIES: dict[str, set[str]] = {
 }
 
 CATEGORY_GLYPH = {"Video": "film", "Archives": "archive", "Programs": "window", "Documents": "filetext"}
-CATEGORY_COLOR = {"Video": "#A78BFA", "Archives": theme.AMBER, "Programs": theme.GREEN, "Documents": "#60A5FA"}
+
+
+def category_color(cat: str | None) -> str:
+    p = theme.active()
+    return p.categories.get(cat, p.muted)
+
 
 STATUS_FILTERS = {
     "All": lambda s: True,
@@ -104,13 +109,13 @@ class DownloadModel(QAbstractTableModel):
         if role == Qt.ForegroundRole:
             if col == 2:
                 if s.status == Status.ERROR:
-                    return QColor(theme.RED)
+                    return QColor(theme.active().red)
                 if s.status == Status.COMPLETED:
-                    return QColor(theme.GREEN)
+                    return QColor(theme.active().green)
                 if not s.status.is_running:
-                    return QColor(theme.MUTED)
+                    return QColor(theme.active().muted)
             if col == 3 and not s.status.is_running:
-                return QColor(theme.MUTED)
+                return QColor(theme.active().muted)
         if role == Qt.ToolTipRole:
             return s.error if s.status == Status.ERROR and s.error else s.url
         return None
@@ -138,23 +143,26 @@ class DownloadModel(QAbstractTableModel):
         return True
 
 
-def _bar_gradient(rect: QRectF, status: Status) -> QLinearGradient | QColor:
+def _bar_fill(rect: QRectF, status: Status) -> QLinearGradient | QColor:
+    pal = theme.active()
     if status == Status.COMPLETED:
-        return QColor(theme.GREEN)
+        return QColor(pal.green)
     if status == Status.ERROR:
-        return QColor(theme.RED)
+        return QColor(pal.red)
     if status in (Status.PAUSED, Status.QUEUED):
-        return QColor("#4B6491")
+        return QColor(pal.paused)
+    if pal.bar_start == pal.bar_end:
+        return QColor(pal.bar_start)
     g = QLinearGradient(rect.topLeft(), rect.topRight())
-    g.setColorAt(0, QColor(theme.BLUE))
-    g.setColorAt(1, QColor(theme.CYAN))
+    g.setColorAt(0, QColor(pal.bar_start))
+    g.setColorAt(1, QColor(pal.bar_end))
     return g
 
 
 def paint_bar(p: QPainter, rect: QRectF, fraction: float | None, status: Status, radius: float = 2.5,
-              track: str = theme.TRACK) -> None:
+              track: str | None = None) -> None:
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(track))
+    p.setBrush(QColor(track or theme.active().track))
     p.drawRoundedRect(rect, radius, radius)
     if fraction is None:
         return
@@ -162,12 +170,12 @@ def paint_bar(p: QPainter, rect: QRectF, fraction: float | None, status: Status,
     if w <= 0:
         return
     fill = QRectF(rect.x(), rect.y(), max(w, radius * 2), rect.height())
-    p.setBrush(_bar_gradient(rect, status))
+    p.setBrush(_bar_fill(rect, status))
     p.drawRoundedRect(fill, radius, radius)
 
 
 def _row_border(p: QPainter, option) -> None:
-    p.setPen(QPen(QColor("#162A4D"), 1))
+    p.setPen(QPen(QColor(theme.active().divider), 1))
     y = option.rect.bottom()
     p.drawLine(option.rect.left(), y, option.rect.right(), y)
 
@@ -192,17 +200,18 @@ class NameDelegate(QStyledItemDelegate):
         self.initStyleOption(option, index)
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
+        pal = theme.active()
         if option.state & QStyle.State_Selected:
-            p.fillRect(option.rect, QColor(theme.SURFACE_HI))
+            p.fillRect(option.rect, QColor(pal.row_sel))
         r = QRectF(option.rect).adjusted(12, 7, -12, -8)
         cat = category_of(s)
         glyph_rect = QRectF(r.x(), r.y() + 1, self.GLYPH, self.GLYPH)
         paint_glyph(p, CATEGORY_GLYPH.get(cat, "file"), glyph_rect,
-                    CATEGORY_COLOR.get(cat, theme.MUTED), 1.9)
+                    category_color(cat), 1.9)
         f = QFont(option.font)
         f.setWeight(QFont.DemiBold)
         p.setFont(f)
-        p.setPen(QPen(QColor(theme.TEXT)))
+        p.setPen(QPen(QColor(pal.text)))
         tx = r.x() + self.GLYPH + 8
         text_rect = QRectF(tx, r.y(), r.right() - tx, self.GLYPH + 2)
         name = p.fontMetrics().elidedText(display_name(s), Qt.ElideMiddle, int(text_rect.width()))

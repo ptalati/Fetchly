@@ -5,19 +5,22 @@ from __future__ import annotations
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QSizePolicy, QStyledItemDelegate, QTreeWidget, QTreeWidgetItem,
+    QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QSizePolicy, QStyle, QStyledItemDelegate,
     QVBoxLayout, QWidget,
 )
 
 from ..engine import DownloadSnapshot, SegmentView, Status
 from ..util import human_size
 from . import theme
-from .icons import glyph_pixmap, nav_icon
+from .icons import glyph_pixmap, paint_glyph
 from .model import CATEGORIES, STATUS_FILTERS, matches, paint_bar
 
 SEPARATOR = "·"
 MAX_BLOCKS = 16
 DividerRole = Qt.UserRole + 2
+CountRole = Qt.UserRole + 3
+GlyphRole = Qt.UserRole + 4
+COUNTED = ("Active", "Queued")
 
 
 class ElidedLabel(QLabel):
@@ -52,20 +55,24 @@ class HeaderBar(QFrame):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 8, 16, 8)
         lay.setSpacing(8)
-        mark = QLabel()
-        mark.setPixmap(glyph_pixmap("bolt", theme.CYAN, 20))
-        lay.addWidget(mark)
+        self.mark = QLabel()
+        lay.addWidget(self.mark)
         title = QLabel("Fetchly")
         title.setObjectName("appTitle")
         lay.addWidget(title)
         lay.addStretch(1)
         self.arrow = QLabel()
-        self.arrow.setPixmap(glyph_pixmap("arrow_down", theme.MUTED, 14))
         lay.addWidget(self.arrow)
         self.speed = QLabel("-")
         self.speed.setObjectName("totalSpeed")
         lay.addWidget(self.speed)
         self.set_speed(None)
+        self.refresh_theme()
+
+    def refresh_theme(self) -> None:
+        p = theme.active()
+        self.mark.setPixmap(glyph_pixmap("bolt", p.highlight, 20))
+        self.arrow.setPixmap(glyph_pixmap("arrow_down", p.muted, 14))
 
     def set_speed(self, text: str | None) -> None:
         self.arrow.setVisible(bool(text))
@@ -73,35 +80,50 @@ class HeaderBar(QFrame):
 
 
 class SidebarDelegate(QStyledItemDelegate):
-    """Draws the divider and small CATEGORIES label; everything else is stock."""
+    """One painter for the whole row: rounded selection pill, line icon, label and right-aligned count."""
+
+    ICON = 16
 
     def paint(self, p: QPainter, option, index):
-        if not index.data(DividerRole):
-            return super().paint(p, option, index)
+        pal = theme.active()
         r = QRectF(option.rect)
         p.save()
-        p.setPen(QPen(QColor(theme.BORDER), 1))
-        left = r.left() + (4 if index.column() == 0 else 0)
-        right = r.right() - (4 if index.column() == 1 else 0)
-        p.drawLine(int(left), int(r.top() + 8), int(right), int(r.top() + 8))
-        if index.column() == 0:
+        p.setRenderHint(QPainter.Antialiasing)
+        if index.data(DividerRole):
+            p.setPen(QPen(QColor(pal.border), 1))
+            y = int(r.center().y())
+            p.drawLine(int(r.left()) + 4, y, int(r.right()) - 4, y)
+            p.restore()
+            return
+        selected = bool(option.state & QStyle.State_Selected)
+        pill = r.adjusted(0, 1, 0, -1)
+        if selected or option.state & QStyle.State_MouseOver:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(pal.pill if selected else pal.hover))
+            p.drawRoundedRect(pill, 8, 8)
+        icon_rect = QRectF(pill.left() + 10, pill.center().y() - self.ICON / 2, self.ICON, self.ICON)
+        paint_glyph(p, index.data(GlyphRole), icon_rect, pal.nav_active if selected else pal.muted, 1.8)
+        count = index.data(CountRole)
+        right = pill.right() - 10
+        if count:
             f = QFont(option.font)
-            f.setPointSizeF(8)
-            f.setWeight(QFont.DemiBold)
-            f.setLetterSpacing(QFont.AbsoluteSpacing, 0.8)
+            f.setPointSizeF(9)
             p.setFont(f)
-            p.setPen(QColor(theme.MUTED))
-            p.drawText(QRectF(r.left() + 8, r.top() + 12, r.width() - 8, r.height() - 12),
-                       Qt.AlignLeft | Qt.AlignVCenter, "CATEGORIES")
+            p.setPen(QColor(pal.muted))
+            p.drawText(QRectF(pill.left(), pill.top(), right - pill.left(), pill.height()),
+                       Qt.AlignRight | Qt.AlignVCenter, str(count))
+        p.setFont(option.font)
+        p.setPen(QColor(pal.text if selected else pal.muted))
+        tx = icon_rect.right() + 8
+        p.drawText(QRectF(tx, pill.top(), right - tx, pill.height()), Qt.AlignLeft | Qt.AlignVCenter,
+                   index.data(Qt.DisplayRole))
         p.restore()
 
     def sizeHint(self, option, index):
-        if index.data(DividerRole):
-            return QSize(0, 34)
-        return super().sizeHint(option, index)
+        return QSize(0, 17 if index.data(DividerRole) else 32)
 
 
-class Sidebar(QTreeWidget):
+class Sidebar(QListWidget):
     filterChanged = Signal(str)
 
     GLYPHS = {
@@ -112,48 +134,36 @@ class Sidebar(QTreeWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("sidebar")
-        self.setHeaderHidden(True)
-        self.setColumnCount(2)
-        self.setRootIsDecorated(False)
-        self.setIndentation(0)
         self.setFocusPolicy(Qt.NoFocus)
+        self.setMouseTracking(True)
         self.setFixedWidth(150)
-        self.setIconSize(QSize(16, 16))
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setItemDelegate(SidebarDelegate(self))
-        self._items: dict[str, QTreeWidgetItem] = {}
+        self._items: dict[str, QListWidgetItem] = {}
         for key in STATUS_FILTERS:
             self._add(key)
-        divider = QTreeWidgetItem(self, ["", ""])
+        divider = QListWidgetItem(self)
         divider.setFlags(Qt.NoItemFlags)
-        divider.setData(0, DividerRole, True)
-        divider.setData(1, DividerRole, True)
+        divider.setData(DividerRole, True)
         for key in CATEGORIES:
             self._add(key)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        hdr = self.header()
-        hdr.setStretchLastSection(False)
-        hdr.setSectionResizeMode(0, hdr.ResizeMode.Stretch)
-        hdr.setSectionResizeMode(1, hdr.ResizeMode.Fixed)
-        self.setColumnWidth(1, 26)
         self.setCurrentItem(self._items["All"])
         self.currentItemChanged.connect(self._changed)
 
     def _add(self, key: str) -> None:
-        item = QTreeWidgetItem(self, [key, ""])
-        item.setData(0, Qt.UserRole, key)
-        item.setIcon(0, nav_icon(self.GLYPHS[key], theme.MUTED, theme.CYAN))
-        item.setTextAlignment(1, Qt.AlignRight | Qt.AlignVCenter)
-        item.setForeground(1, QColor(theme.MUTED))
+        item = QListWidgetItem(key, self)
+        item.setData(Qt.UserRole, key)
+        item.setData(GlyphRole, self.GLYPHS[key])
         self._items[key] = item
 
     def _changed(self, cur, _prev):
-        if cur is not None and cur.data(0, Qt.UserRole):
-            self.filterChanged.emit(cur.data(0, Qt.UserRole))
+        if cur is not None and cur.data(Qt.UserRole):
+            self.filterChanged.emit(cur.data(Qt.UserRole))
 
     def update_counts(self, snaps: list[DownloadSnapshot]) -> None:
-        for key, item in self._items.items():
-            n = sum(1 for s in snaps if matches(s, key))
-            item.setText(1, str(n) if n else "")
+        """Counts show on Active and Queued only, and only when there is something in them."""
+        for key in COUNTED:
+            self._items[key].setData(CountRole, sum(1 for s in snaps if matches(s, key)) or None)
 
 
 def block_fractions(snap: DownloadSnapshot, limit: int = MAX_BLOCKS) -> list[float | None]:
@@ -202,7 +212,7 @@ class SegmentBlocks(QWidget):
         if n == 0:
             # nothing fetched yet: show an empty track so the strip keeps its shape
             paint_bar(p, QRectF(0, 0, self.width(), self.BLOCK_H),
-                      1.0 if status == Status.COMPLETED else None, status, 4, "#162A4D")
+                      1.0 if status == Status.COMPLETED else None, status, 4, theme.active().block_track)
             p.end()
             return
         bw = (self.width() - self.GAP * (n - 1)) / n
@@ -211,21 +221,21 @@ class SegmentBlocks(QWidget):
                 frac = 1.0
             elif frac is None and self.snap and self.snap.progress is not None:
                 frac = self.snap.progress
-            paint_bar(p, QRectF(i * (bw + self.GAP), 0, bw, self.BLOCK_H), frac, status, 4, "#162A4D")
+            paint_bar(p, QRectF(i * (bw + self.GAP), 0, bw, self.BLOCK_H), frac, status, 4, theme.active().block_track)
         p.end()
 
 
 class DetailPanel(QFrame):
-    """One compact strip: title, connection summary and percent, the blocks, a caption."""
+    """One compact strip: title and connection summary, the blocks, then caption and percent."""
 
     CAPTION = "Each block is one thread fetching its own byte range"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("detail")
-        self.setFixedHeight(138)
+        self.setFixedHeight(108)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 10)
+        lay.setContentsMargins(16, 12, 16, 12)
         lay.setSpacing(0)
 
         top = QHBoxLayout()
@@ -237,27 +247,25 @@ class DetailPanel(QFrame):
         self.summary = QLabel("")
         self.summary.setProperty("muted", True)
         top.addWidget(self.summary)
-        self.percent = QLabel("")
-        self.percent.setObjectName("detailPercent")
-        self.percent.setMinimumWidth(40)
-        self.percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        top.addWidget(self.percent)
         lay.addLayout(top)
 
-        lay.addSpacing(8)
+        lay.addSpacing(10)
         self.blocks = SegmentBlocks()
         lay.addWidget(self.blocks)
-        lay.addSpacing(6)
+        lay.addSpacing(8)
 
-        self.caption = QLabel(self.CAPTION)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(12)
+        self.caption = ElidedLabel(self.CAPTION)
         self.caption.setObjectName("caption")
-        lay.addWidget(self.caption)
+        self.caption.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        bottom.addWidget(self.caption, 1)
+        self.percent = QLabel("")
+        self.percent.setObjectName("detailPercent")
+        self.percent.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        bottom.addWidget(self.percent)
+        lay.addLayout(bottom)
         lay.addStretch(1)
-
-        self.meta = ElidedLabel("")
-        self.meta.setObjectName("caption")
-        self.meta.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        lay.addWidget(self.meta)
 
     def show_snapshot(self, s: DownloadSnapshot | None) -> None:
         if s is None:
@@ -265,8 +273,7 @@ class DetailPanel(QFrame):
             self.title.setToolTip("")
             self.summary.setText("")
             self.percent.setText("")
-            self.meta.setText("")
-            self.meta.setToolTip("")
+            self._set_caption(self.CAPTION, False)
             self.blocks.set_snapshot(None)
             return
         self.title.setText(s.filename or s.url)
@@ -284,12 +291,12 @@ class DetailPanel(QFrame):
             pct = f"{s.progress * 100:.0f}%" if s.progress is not None else "-"
         self.percent.setText(pct)
         self.blocks.set_snapshot(s)
-
         if s.status == Status.ERROR and s.error:
-            self.meta.setText(f"Error: {s.error}")
-            self.meta.setStyleSheet(f"color: {theme.RED};")
+            self._set_caption(f"Error: {s.error}", True)
         else:
-            self.meta.setText(f"Saved to {s.folder}")
-            self.meta.setStyleSheet("")
-        got = f"{human_size(s.downloaded)} of {human_size(s.size)}"
-        self.meta.setToolTip(f"{got}\n{s.folder}\n{s.url}")
+            self._set_caption(self.CAPTION, False)
+
+    def _set_caption(self, text: str, error: bool) -> None:
+        self.caption.setText(text)
+        self.caption.setStyleSheet(f"color: {theme.active().red};" if error else "")
+        self.caption.setToolTip(text if error else "")

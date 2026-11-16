@@ -8,13 +8,15 @@ from pathlib import Path
 from PySide6.QtCore import QItemSelectionModel, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QHeaderView, QLabel, QMainWindow, QMenu, QMessageBox,
+    QAbstractItemView, QCheckBox, QHeaderView, QMainWindow, QMenu, QMessageBox,
     QSizePolicy, QSystemTrayIcon, QTableView, QToolBar, QVBoxLayout, QWidget, QHBoxLayout,
 )
 
+from .. import autostart, native_host_install
 from ..engine import DEFAULT_CONNECTIONS, DownloadManager, DownloadSnapshot, Status
 from ..util import default_download_dir, human_speed, reveal_in_file_manager
-from . import icons
+from . import icons, theme
+from .clipboard_watch import ClipboardWatcher
 from .dialogs import AddUrlDialog, SettingsDialog
 from .model import DownloadModel, NameDelegate, TextDelegate
 from .taskbar import TaskbarProgress, overall
@@ -33,15 +35,24 @@ class MainWindow(QMainWindow):
         self._quitting = False
         self._last_status: dict[int, Status] = {}
         self._notify_folder: str | None = None
+        self._add_dialog_open = False
+        self._pending_adds: list[dict] = []
+        self.add_dialog: AddUrlDialog | None = None
 
         self.header = HeaderBar()
         self.setMenuWidget(self.header)
         self._build_toolbar()
         self._build_body()
         self._build_tray()
-        self._build_statusbar()
+
+        self.act_quit = QAction("Quit Fetchly", self, shortcut="Ctrl+Q", triggered=self.quit_app)
+        self.addAction(self.act_quit)
+        self.clipboard_watcher = ClipboardWatcher(self, enabled=self.flag("watch_clipboard", True))
+        self.clipboard_watcher.linkCopied.connect(self._on_clipboard_link)
+        self.act_watch.setChecked(self.clipboard_watcher.enabled)
 
         self.taskbar = TaskbarProgress()
+        theme.on_change(self._theme_changed)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.refresh)
         self.timer.start(REFRESH_MS)
@@ -55,6 +66,18 @@ class MainWindow(QMainWindow):
             return default
         return type(default)(v)
 
+    def flag(self, key: str, default: bool) -> bool:
+        v = self.manager.store.get_setting(key)
+        return default if v is None else v.strip().lower() in ("1", "true", "yes", "on")
+
+    def set_flag(self, key: str, value: bool) -> None:
+        self.manager.store.set_setting(key, "1" if value else "0")
+
+    def attach_server(self, server) -> None:
+        """Handle "show" and "add" requests from second launches and the browser extension."""
+        server.showRequested.connect(self.show_window)
+        server.addRequested.connect(self.on_browser_add)
+
     # layout -----------------------------------------------------------------
 
     def _build_toolbar(self):
@@ -63,13 +86,13 @@ class MainWindow(QMainWindow):
         tb.setIconSize(QSize(18, 18))
         tb.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         self.addToolBar(tb)
-        self.act_add = QAction(icons.add_icon(), "Add URL", self, shortcut="Ctrl+N", triggered=self.add_url)
-        self.act_resume = QAction(icons.resume_icon(), "Resume", self, triggered=self.resume_selected)
-        self.act_pause = QAction(icons.pause_icon(), "Pause", self, triggered=self.pause_selected)
-        self.act_remove = QAction(icons.remove_icon(), "Remove", self, shortcut="Delete", triggered=self.remove_selected)
-        self.act_settings = QAction(icons.settings_icon(), "Settings", self, triggered=self.open_settings)
+        self.act_add = QAction("Add URL", self, shortcut="Ctrl+N", triggered=self.add_url)
+        self.act_resume = QAction("Resume", self, triggered=self.resume_selected)
+        self.act_pause = QAction("Pause", self, triggered=self.pause_selected)
+        self.act_remove = QAction("Remove", self, shortcut="Delete", triggered=self.remove_selected)
+        self.act_settings = QAction("Settings", self, triggered=self.open_settings)
+        self._apply_icons()
         tb.addAction(self.act_add)
-        tb.widgetForAction(self.act_add).setObjectName("primary")
         for a in (self.act_resume, self.act_pause, self.act_remove):
             tb.addAction(a)
         spacer = QWidget()
@@ -80,6 +103,20 @@ class MainWindow(QMainWindow):
         sb.setObjectName("iconOnly")
         sb.setToolButtonStyle(Qt.ToolButtonIconOnly)
         sb.setToolTip("Settings")
+
+    def _apply_icons(self) -> None:
+        """(Re)create the toolbar icons in the active theme's colours."""
+        for act, make in ((self.act_add, icons.add_icon), (self.act_resume, icons.resume_icon),
+                          (self.act_pause, icons.pause_icon), (self.act_remove, icons.remove_icon),
+                          (self.act_settings, icons.settings_icon)):
+            act.setIcon(make())
+
+    def _theme_changed(self, _palette) -> None:
+        self._apply_icons()
+        self.header.refresh_theme()
+        self.sidebar.viewport().update()
+        self.table.viewport().update()
+        self._update_detail()
 
     def _build_body(self):
         self.sidebar = Sidebar()
@@ -125,23 +162,19 @@ class MainWindow(QMainWindow):
         lay.addWidget(right, 1)
         self.setCentralWidget(central)
 
-    def _build_statusbar(self):
-        self.status_left = QLabel()
-        self.status_right = QLabel()
-        self.statusBar().addWidget(self.status_left, 1)
-        self.status_right.setMinimumWidth(180)
-        self.status_right.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.statusBar().addPermanentWidget(self.status_right)
-        self.statusBar().setSizeGripEnabled(False)
-
     def _build_tray(self):
         self.tray = QSystemTrayIcon(icons.app_icon(), self)
         self.tray.setToolTip("Fetchly")
         menu = QMenu()
-        menu.addAction("Show Fetchly", self.show_window)
-        menu.addAction("Add URL...", self.add_url)
+        menu.addAction("Open Fetchly", self.show_window)
+        menu.addAction("Add URL...", lambda: self.add_url(show_main=False))
+        menu.addAction("Pause all", self.pause_all)
+        self.act_watch = menu.addAction("Watch clipboard")
+        self.act_watch.setCheckable(True)
+        self.act_watch.toggled.connect(self._watch_toggled)
         menu.addSeparator()
         menu.addAction("Quit", self.quit_app)
+        self._tray_menu = menu
         self.tray.setContextMenu(menu)
         self.tray.activated.connect(self._tray_activated)
         self.tray.messageClicked.connect(self._open_notified_folder)
@@ -160,9 +193,6 @@ class MainWindow(QMainWindow):
         self._update_actions()
         running = [s for s in snaps if s.status.is_running]
         total = sum(s.speed for s in running)
-        done = sum(1 for s in snaps if s.status == Status.COMPLETED)
-        self.status_left.setText(f"{len(running)} active  -  {done} finished  -  {len(snaps)} total")
-        self.status_right.setText(f"Total speed {human_speed(total)}" if running else "Idle")
         self.header.set_speed(human_speed(total) if running and total > 0 else None)
         self.tray.setToolTip(f"Fetchly - {len(running)} active, {human_speed(total)}" if running else "Fetchly")
         self.taskbar.update(int(self.winId()), *overall(snaps))
@@ -219,8 +249,11 @@ class MainWindow(QMainWindow):
 
     # commands ------------------------------------------------------------------
 
-    def add_url(self, url: str | None = None):
-        self.show_window()
+    def add_url(self, url: str | None = None, headers: dict[str, str] | None = None, show_main: bool = True):
+        if self._add_dialog_open:
+            return
+        if show_main:
+            self.show_window()
         if not isinstance(url, str):  # QAction.triggered passes `checked` (bool)
             clip = QGuiApplication.clipboard().text().strip()
             url = clip if clip.lower().startswith(("http://", "https://")) and "\n" not in clip else ""
@@ -228,17 +261,85 @@ class MainWindow(QMainWindow):
             self, url,
             self.setting("default_folder", str(default_download_dir())),
             self.setting("default_connections", DEFAULT_CONNECTIONS),
+            headers=headers,
         )
-        if dlg.exec() != AddUrlDialog.Accepted:
+        self.add_dialog = dlg
+        self._add_dialog_open = True
+        try:
+            dlg.show()
+            self._bring_to_front(dlg)
+            accepted = dlg.exec() == AddUrlDialog.Accepted
+        finally:
+            self._add_dialog_open = False
+            self.add_dialog = None
+            self.clipboard_watcher.forget_last()
+        if accepted:
+            folder = dlg.folder.text().strip()
+            Path(folder).mkdir(parents=True, exist_ok=True)
+            new_id = self.manager.add(dlg.url.text().strip(), folder, dlg.connections.value(),
+                                      start=dlg.start_now.isChecked(), headers=dlg.headers or None)
+            self.refresh()
+            row = self.model.row_of(new_id)
+            if row >= 0:
+                self.table.selectRow(row)
+        if self._pending_adds:  # browser downloads that arrived while the dialog was open
+            QTimer.singleShot(0, self._run_pending_add)
+
+    def _run_pending_add(self):
+        if self._pending_adds and not self._add_dialog_open:
+            self.on_browser_add(self._pending_adds.pop(0))
+
+    def on_browser_add(self, msg: dict):
+        """A download handed over by the browser extension (via the native host)."""
+        url = msg.get("url")
+        if not isinstance(url, str) or not url:
             return
-        folder = dlg.folder.text().strip()
+        headers = msg.get("headers")
+        headers = {str(k): str(v) for k, v in headers.items()} if isinstance(headers, dict) and headers else {}
+        referrer = msg.get("referrer")
+        if not headers and isinstance(referrer, str) and referrer:
+            headers = {"Referer": referrer}
+        if self.flag("browser_confirm", True):
+            if self._add_dialog_open:
+                self._pending_adds.append(msg)
+                return
+            self.add_url(url, headers=headers, show_main=False)
+            return
+        folder = self.setting("default_folder", str(default_download_dir()))
         Path(folder).mkdir(parents=True, exist_ok=True)
-        new_id = self.manager.add(dlg.url.text().strip(), folder, dlg.connections.value(),
-                                  start=dlg.start_now.isChecked())
+        self.manager.add(url, folder, self.setting("default_connections", DEFAULT_CONNECTIONS),
+                         start=True, headers=headers or None)
         self.refresh()
-        row = self.model.row_of(new_id)
-        if row >= 0:
-            self.table.selectRow(row)
+        self.tray.showMessage("Download added", url, icons.app_icon(), 4000)
+
+    def _on_clipboard_link(self, url: str):
+        if self._add_dialog_open or any(s.url == url for s in self.manager.snapshots()):
+            return
+        self.add_url(url, show_main=False)
+
+    def _watch_toggled(self, on: bool):
+        self.clipboard_watcher.enabled = on
+        self.set_flag("watch_clipboard", on)
+
+    def pause_all(self):
+        for s in self.manager.snapshots():
+            if s.status.is_running or s.status == Status.QUEUED:
+                self.manager.pause(s.id)
+        QTimer.singleShot(100, self.refresh)
+
+    @staticmethod
+    def _bring_to_front(w: QWidget) -> None:
+        """Raise a window above other apps. Windows refuses plain activateWindow() from a background process."""
+        w.setWindowState((w.windowState() & ~Qt.WindowMinimized) | Qt.WindowActive)
+        w.show()
+        w.raise_()
+        w.activateWindow()
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ctypes.windll.user32.SetForegroundWindow(int(w.winId()))
+            except Exception:
+                pass
 
     def resume_selected(self):
         for s in self.selected_snapshots():
@@ -274,11 +375,23 @@ class MainWindow(QMainWindow):
         self.refresh()
 
     def open_settings(self):
+        try:
+            start_at_login = autostart.is_enabled()
+        except Exception:
+            start_at_login = False
+        try:
+            host_ok = native_host_install.is_registered()
+        except Exception:
+            host_ok = False
         dlg = SettingsDialog(
             self,
             self.setting("default_folder", str(default_download_dir())),
             self.setting("default_connections", DEFAULT_CONNECTIONS),
             self.setting("max_active", 3),
+            autostart=start_at_login,
+            watch_clipboard=self.clipboard_watcher.enabled,
+            browser_confirm=self.flag("browser_confirm", True),
+            host_registered=host_ok,
         )
         if dlg.exec() != SettingsDialog.Accepted:
             return
@@ -287,6 +400,13 @@ class MainWindow(QMainWindow):
         store.set_setting("default_connections", str(dlg.connections.value()))
         store.set_setting("max_active", str(dlg.max_active.value()))
         self.manager.set_max_active(dlg.max_active.value())
+        self.set_flag("browser_confirm", dlg.browser_confirm.isChecked())
+        self.act_watch.setChecked(dlg.watch_clipboard.isChecked())  # toggled -> watcher + setting
+        if dlg.autostart.isChecked() != start_at_login:
+            try:
+                autostart.set_enabled(dlg.autostart.isChecked())
+            except Exception as exc:
+                QMessageBox.warning(self, "Start at sign-in", f"Could not change the setting: {exc}")
 
     def _final_path(self, s: DownloadSnapshot) -> Path | None:
         return Path(s.folder) / s.filename if s.filename else None
@@ -343,10 +463,11 @@ class MainWindow(QMainWindow):
         if self._notify_folder:
             QDesktopServices.openUrl(QUrl.fromLocalFile(self._notify_folder))
 
+    def tray_available(self) -> bool:
+        return QSystemTrayIcon.isSystemTrayAvailable()
+
     def show_window(self):
-        self.showNormal()
-        self.raise_()
-        self.activateWindow()
+        self._bring_to_front(self)
 
     def quit_app(self):
         self._quitting = True
@@ -355,17 +476,17 @@ class MainWindow(QMainWindow):
         QGuiApplication.instance().quit()
 
     def closeEvent(self, e):
-        running = any(s.status.is_running or s.status == Status.QUEUED for s in self.manager.snapshots())
-        if running and not self._quitting:
-            e.ignore()
-            self.hide()
-            self.tray.showMessage("Fetchly is still downloading",
-                                  "Downloads continue in the background. "
-                                  + ("Use the Fetchly menu bar icon to quit." if sys.platform == "darwin"
-                                     else "Right-click the tray icon to quit."),
-                                  icons.app_icon(), 4000)
+        if self._quitting:
+            self.tray.hide()
+            e.accept()
+            QGuiApplication.instance().quit()
             return
-        self._quitting = True
-        self.tray.hide()
-        e.accept()
-        QGuiApplication.instance().quit()
+        e.ignore()
+        if not self.tray_available():  # nowhere to hide: minimise instead of losing the window
+            self.showMinimized()
+            return
+        self.hide()
+        if not self.flag("tray_hint_shown", False):
+            self.set_flag("tray_hint_shown", True)
+            self.tray.showMessage("Fetchly", "Fetchly is still running in the tray. Right-click the icon to quit.",
+                                  icons.app_icon(), 5000)

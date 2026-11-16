@@ -30,13 +30,15 @@ class ProbeResult:
     last_modified: str | None
 
 
-async def probe(client: httpx.AsyncClient, url: str) -> ProbeResult:
+async def probe(client: httpx.AsyncClient, url: str, headers: dict[str, str] | None = None,
+                extensions: dict | None = None) -> ProbeResult:
     """GET with ``Range: bytes=0-0``; a 206 answer means byte ranges work.
 
     GET is used instead of HEAD because many servers answer HEAD incorrectly.
     Only the headers are read; the body is not consumed.
     """
-    async with client.stream("GET", url, headers={"Range": "bytes=0-0"}) as r:
+    async with client.stream("GET", url, headers={**(headers or {}), "Range": "bytes=0-0"},
+                             extensions=extensions) as r:
         if r.status_code >= 400:
             raise ProbeError(f"HTTP {r.status_code} {r.reason_phrase}", r.status_code)
         size: int | None = None

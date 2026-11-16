@@ -17,6 +17,25 @@ All versions are on the [Releases](https://github.com/ptalati/Fetchly/releases) 
 - **macOS:** if it says Fetchly "cannot be opened", go to **System Settings > Privacy & Security** and click **Open Anyway**. Or run `xattr -dr com.apple.quarantine /Applications/Fetchly.app` once.
 - **Linux:** needs a desktop with the usual Qt/X11 libraries (any recent Ubuntu, Fedora or Mint has them).
 
+## Browser integration
+
+Fetchly can take over downloads from Chrome, Edge, Brave and Firefox, and catches copied download links too.
+
+1. Install and start Fetchly once. It registers itself with your browsers when it starts.
+2. Download the extension from the [Releases](https://github.com/ptalati/Fetchly/releases) page: [Fetchly-Browser-Extension.zip](https://github.com/ptalati/Fetchly/releases/latest/download/Fetchly-Browser-Extension.zip) for Chrome, Edge and Brave, [Fetchly-Firefox-Extension.zip](https://github.com/ptalati/Fetchly/releases/latest/download/Fetchly-Firefox-Extension.zip) for Firefox. Unzip it somewhere permanent (the browser loads it from that folder).
+3. Load it:
+   - **Chrome:** open `chrome://extensions`, turn on **Developer mode**, click **Load unpacked** and pick the unzipped folder.
+   - **Edge:** the same at `edge://extensions`.
+   - **Brave:** the same at `brave://extensions`.
+   - **Firefox:** Firefox only keeps unsigned add-ons until it closes. Open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on** and pick `manifest.json` from the unzipped folder. This is needed again after each restart until the add-on is signed.
+
+The extension cancels the browser's own download and sends the link (with the cookies and referrer the browser used) to Fetchly, so logged-in and expiring links keep working. If Fetchly can't be reached, the browser downloads the file itself. Right-click a link and choose **Download with Fetchly** to send one by hand. The toolbar button turns capturing on or off, sets a minimum file size, and shows whether Fetchly is connected.
+
+- **Start at sign-in:** Fetchly can start with your computer and sit in the system tray, so downloads from the browser are always caught.
+- **Clipboard capture:** copy a link to a file (video, archive, installer, document and so on) and Fetchly offers to download it.
+
+To build the extension zips yourself: `pip install pillow`, then `python browser-extension/build.py` (the zips land in `browser-extension/dist/`).
+
 ## Features
 
 - Up to 16 parallel connections per download. When one finishes early, it splits the largest remaining piece so every connection stays busy.

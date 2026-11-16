@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Fetchly",
+  "description": "Send browser downloads to the Fetchly download manager.",
+  "version": "0.1.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsTvIO1ZEihKS7eYATTvQQHCyir521GAdjm9fcVrS0sIY610PaR3aIzf9tDfaeZRcy4uInX0DnkltuJjBbRxraF+uNasfseq3cwUhTfTGWwBON8FQZOwitnVbV/HIJIB9dyxjmbu9jaNIgKfev0E2VDYDlbv9hljrbj+1cr8QhYZafxbIXhzZzP8qKpW9coDnGmR4zxOIDX5usmY3fi9OIjYVMrHUHma7he0/9s9qqC6l3TMyntRTfBEMA26Iczuj+PfW3flFfy0BY97tPLjGubPjR29JCVkeBQboM0mQaK2YdpNWONQ54sHbVysdRdkYNxQ0EhTLk+FqLalRC8qD0QIDAQAB",
+  "minimum_chrome_version": "110",
+  "permissions": ["downloads", "contextMenus", "nativeMessaging", "cookies", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Fetchly",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" }
+  },
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+}

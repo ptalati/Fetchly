@@ -10,7 +10,7 @@ import asyncio
 import threading
 from pathlib import Path
 
-from .downloader import DEFAULT_CONNECTIONS, Download
+from .downloader import DEFAULT_CONNECTIONS, Download, clean_headers
 from .models import DownloadRecord, DownloadSnapshot, Status
 from .store import Store
 
@@ -60,9 +60,11 @@ class DownloadManager:
 
     # commands (any thread) ------------------------------------------------
 
-    def add(self, url: str, folder: str, connections: int = DEFAULT_CONNECTIONS, start: bool = True) -> int:
+    def add(self, url: str, folder: str, connections: int = DEFAULT_CONNECTIONS, start: bool = True,
+            headers: dict[str, str] | None = None) -> int:
         rec = DownloadRecord(url=url, folder=str(folder), connections=connections,
-                             status=Status.QUEUED if start else Status.PAUSED)
+                             status=Status.QUEUED if start else Status.PAUSED,
+                             headers=clean_headers(headers))
         self.store.add(rec)
         with self._lock:
             self._downloads[rec.id] = Download(self.store, rec, **self._kwargs)

@@ -31,8 +31,9 @@ def _folder_row(parent: QWidget, edit: QLineEdit) -> QWidget:
 
 
 class AddUrlDialog(QDialog):
-    def __init__(self, parent, url: str, folder: str, connections: int):
+    def __init__(self, parent, url: str, folder: str, connections: int, headers: dict[str, str] | None = None):
         super().__init__(parent)
+        self.headers = dict(headers or {})  # request headers from the browser (cookies, referer)
         self.setWindowTitle("Add download")
         self.setMinimumWidth(560)
         v = QVBoxLayout(self)
@@ -85,7 +86,8 @@ class AddUrlDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent, folder: str, connections: int, max_active: int):
+    def __init__(self, parent, folder: str, connections: int, max_active: int, *, autostart: bool = False,
+                 watch_clipboard: bool = True, browser_confirm: bool = True, host_registered: bool = False):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setMinimumWidth(520)
@@ -111,7 +113,19 @@ class SettingsDialog(QDialog):
         self.max_active.setValue(max_active)
         self.max_active.setFixedWidth(90)
         form.addRow("Simultaneous downloads", self.max_active)
+        self.autostart = QCheckBox("Start Fetchly when I sign in")
+        self.autostart.setChecked(autostart)
+        form.addRow("", self.autostart)
+        self.watch_clipboard = QCheckBox("Watch clipboard for download links")
+        self.watch_clipboard.setChecked(watch_clipboard)
+        form.addRow("", self.watch_clipboard)
+        self.browser_confirm = QCheckBox("Ask before downloading links from the browser")
+        self.browser_confirm.setChecked(browser_confirm)
+        form.addRow("", self.browser_confirm)
         v.addLayout(form)
+        self.host_status = QLabel("Browser extension host: " + ("registered" if host_registered else "not registered"))
+        self.host_status.setObjectName("caption")
+        v.addWidget(self.host_status)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         save = buttons.button(QDialogButtonBox.Save)
         save.setObjectName("primary")

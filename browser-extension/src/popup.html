@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fetchly</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1d1f24; --muted:#6b7280; --ok:#16a34a; --bad:#dc2626; --line:#d9dce1; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1d22; --fg:#e8eaed; --muted:#9aa0a6; --line:#3a3d44; } }
+  body { margin:0; width:280px; padding:14px 16px; font:13px system-ui, sans-serif; background:var(--bg); color:var(--fg); }
+  h1 { font-size:15px; margin:0 0 10px; }
+  label { display:flex; align-items:center; justify-content:space-between; gap:10px; margin:10px 0; }
+  input[type=number] { width:70px; padding:3px 6px; background:transparent; color:inherit; border:1px solid var(--line); border-radius:4px; }
+  #status { margin-top:12px; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); }
+  #status.ok { color:var(--ok); }
+  #status.bad { color:var(--bad); }
+</style>
+</head>
+<body>
+  <h1>Fetchly</h1>
+  <label><span>Capture downloads</span><input type="checkbox" id="enabled"></label>
+  <label><span>Minimum file size (MB)</span><input type="number" id="minSize" min="0" step="1"></label>
+  <div id="status">Checking...</div>
+  <script src="popup.js"></script>
+</body>
+</html>

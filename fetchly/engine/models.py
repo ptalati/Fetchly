@@ -68,6 +68,8 @@ class DownloadRecord:
     created_at: float = 0.0
     finished_at: float | None = None
     segments: list[Segment] = field(default_factory=list)
+    # Extra request headers (Cookie, Referer, User-Agent...) sent on the probe and every segment request.
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

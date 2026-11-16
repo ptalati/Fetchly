@@ -77,8 +77,28 @@ jobs:
           path: dist/${{ matrix.asset }}
           if-no-files-found: error
 
+  extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build browser extension zips
+        run: |
+          pip install pillow
+          python browser-extension/build.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension
+          path: browser-extension/dist/*.zip
+          if-no-files-found: error
+
   release:
-    needs: build
+    needs: [build, extension]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:

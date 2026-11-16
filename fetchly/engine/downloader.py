@@ -28,6 +28,32 @@ RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
 USER_AGENT = "Fetchly/0.1"
 
 
+# Headers the engine owns; a browser-supplied copy would break ranges, decoding or framing.
+_RESERVED_HEADERS = {"range", "if-range", "host", "content-length", "accept-encoding", "connection",
+                     "transfer-encoding", "te", "upgrade", "proxy-authorization", "proxy-connection"}
+# Credentials that must never follow a redirect to another host.
+_ORIGIN_ONLY_HEADERS = {"cookie", "authorization"}
+
+
+def clean_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    """Keep only headers worth forwarding from a browser (drops ones the engine controls itself)."""
+    out: dict[str, str] = {}
+    for k, v in (headers or {}).items():
+        k, v = str(k).strip(), str(v).strip()
+        if k and v and k.lower() not in _RESERVED_HEADERS and "\n" not in k + v and "\r" not in k + v:
+            out[k] = v
+    return out
+
+
+async def _strip_foreign_credentials(request: httpx.Request) -> None:
+    """Request hook: Cookie/Authorization only go to the host the download was started from."""
+    origin = request.extensions.get("fetchly_origin")
+    if origin and request.url.host != origin:
+        for name in list(request.headers):
+            if name.lower() in _ORIGIN_ONLY_HEADERS:
+                del request.headers[name]
+
+
 class DownloadError(Exception):
     pass
 
@@ -45,6 +71,7 @@ def make_client(max_connections: int = MAX_CONNECTIONS) -> httpx.AsyncClient:
         timeout=httpx.Timeout(30.0, connect=15.0),
         limits=httpx.Limits(max_connections=max_connections + 2, max_keepalive_connections=max_connections),
         headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"},
+        event_hooks={"request": [_strip_foreign_credentials]},
     )
 
 
@@ -163,7 +190,8 @@ class Download:
         rec = self.rec
         self._set_status(Status.CONNECTING)
         async with self.client_factory() as client:
-            info = await self._with_retry(lambda: probe(client, rec.url))
+            info = await self._with_retry(
+                lambda: probe(client, rec.url, rec.headers, self._extensions()))
             self._url = info.final_url
             self._prepare(info)
             await asyncio.to_thread(self._open_file)  # allocation can be slow off NTFS
@@ -186,6 +214,9 @@ class Download:
         if not all(s.done for s in rec.segments):
             raise DownloadError("download ended with missing data")
         self._finish()
+
+    def _extensions(self) -> dict:
+        return {"fetchly_origin": httpx.URL(self.rec.url).host}
 
     def _prepare(self, info: ProbeResult) -> None:
         """Decide whether the saved segments can be reused, else lay out fresh ones."""
@@ -261,14 +292,14 @@ class Download:
         attempt = 0
         while not seg.done:
             try:
-                headers = {}
+                headers = dict(self.rec.headers)
                 if self.rec.resumable:
                     headers["Range"] = f"bytes={seg.pos}-{seg.end}"
                 elif seg.downloaded:
                     # No ranges: a retry has to start over.
                     self.rec.downloaded -= seg.downloaded
                     seg.downloaded = 0
-                async with client.stream("GET", self._url, headers=headers) as r:
+                async with client.stream("GET", self._url, headers=headers, extensions=self._extensions()) as r:
                     if r.status_code in RETRYABLE_STATUS:
                         raise _Transient(f"HTTP {r.status_code}")
                     if r.status_code >= 400:

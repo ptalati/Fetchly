@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -24,7 +25,8 @@ CREATE TABLE IF NOT EXISTS downloads (
     downloaded INTEGER NOT NULL DEFAULT 0,
     error TEXT,
     created_at REAL NOT NULL,
-    finished_at REAL
+    finished_at REAL,
+    headers TEXT
 );
 CREATE TABLE IF NOT EXISTS segments (
     download_id INTEGER NOT NULL REFERENCES downloads(id) ON DELETE CASCADE,
@@ -42,7 +44,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 _FIELDS = (
     "url", "folder", "filename", "size", "resumable", "etag", "last_modified",
-    "connections", "status", "downloaded", "error", "created_at", "finished_at",
+    "connections", "status", "downloaded", "error", "created_at", "finished_at", "headers",
 )
 
 
@@ -60,6 +62,13 @@ class Store:
             self._db.execute("PRAGMA journal_mode=WAL")
             self._db.execute("PRAGMA foreign_keys=ON")
             self._db.executescript(SCHEMA)
+            self._migrate()
+
+    def _migrate(self) -> None:
+        # Databases created before request headers existed lack the column.
+        cols = {r["name"] for r in self._db.execute("PRAGMA table_info(downloads)")}
+        if "headers" not in cols:
+            self._db.execute("ALTER TABLE downloads ADD COLUMN headers TEXT")
 
     def close(self) -> None:
         with self._lock:
@@ -166,7 +175,7 @@ class Store:
         return (
             rec.url, rec.folder, rec.filename, rec.size, int(rec.resumable), rec.etag,
             rec.last_modified, rec.connections, rec.status.value, rec.downloaded, rec.error,
-            rec.created_at, rec.finished_at,
+            rec.created_at, rec.finished_at, json.dumps(rec.headers) if rec.headers else None,
         )
 
     def _record(self, row: sqlite3.Row) -> DownloadRecord:
@@ -189,5 +198,16 @@ class Store:
             error=row["error"],
             created_at=row["created_at"],
             finished_at=row["finished_at"],
+            headers=_load_headers(row["headers"]),
             segments=[Segment(s["start"], s["end"], s["downloaded"]) for s in segs],
         )
+
+
+def _load_headers(raw: str | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return {}
+    return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}

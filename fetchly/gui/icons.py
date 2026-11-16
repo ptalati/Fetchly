@@ -7,6 +7,8 @@ from pathlib import Path
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPainterPath, QPen, QPixmap
 
+from . import theme
+
 RESOURCES = Path(__file__).parent / "resources"
 
 
@@ -177,37 +179,34 @@ def glyph_pixmap(key: str, color: str | QColor, size: int, scale: int = 2) -> QP
     return pm
 
 
-def glyph_icon(key: str, color: str = "#E8EEF8", disabled: str = "#4E628A",
-               selected: str | None = None, size: int = 20) -> QIcon:
+def glyph_icon(key: str, color: str, disabled: str, size: int = 20) -> QIcon:
     icon = QIcon()
-    modes = [(QIcon.Normal, color), (QIcon.Disabled, disabled)]
-    if selected:
-        modes.append((QIcon.Selected, selected))
-    for mode, c in modes:
+    for mode, c in ((QIcon.Normal, color), (QIcon.Disabled, disabled)):
         for scale in (1, 2):
             icon.addPixmap(glyph_pixmap(key, c, size, scale), mode)
     return icon
 
 
-def add_icon(color="#FFFFFF") -> QIcon:
-    return glyph_icon("plus", color, disabled="#9FB8E8")
+def _themed(key: str) -> QIcon:
+    p = theme.active()
+    return glyph_icon(key, p.text, p.disabled)
+
+
+def add_icon() -> QIcon:
+    return _themed("plus")
 
 
 def resume_icon() -> QIcon:
-    return glyph_icon("play")
+    return _themed("play")
 
 
 def pause_icon() -> QIcon:
-    return glyph_icon("pause")
+    return _themed("pause")
 
 
 def remove_icon() -> QIcon:
-    return glyph_icon("trash")
+    return _themed("trash")
 
 
 def settings_icon() -> QIcon:
-    return glyph_icon("settings")
-
-
-def nav_icon(key: str, muted: str, active: str) -> QIcon:
-    return glyph_icon(key, muted, selected=active, size=16)
+    return _themed("settings")

@@ -1,7 +1,7 @@
 ; Inno Setup script for the Windows installer. Run after PyInstaller:
-;   iscc /DAppVersion=0.1.1 packaging\fetchly.iss
+;   iscc /DAppVersion=0.1.2 packaging\fetchly.iss
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 
 [Setup]

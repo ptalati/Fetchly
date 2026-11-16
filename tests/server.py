@@ -27,6 +27,8 @@ class RangeServer:
         filename: str = "file.bin",
         etag: str | None = '"v1"',
         fail_first: int = 0,
+        require_headers: dict[str, str] | None = None,
+        redirect_to: str | None = None,
     ):
         self.data = data
         self.ranges = ranges
@@ -35,6 +37,9 @@ class RangeServer:
         self.filename = filename
         self.etag = etag
         self.fail_first = fail_first  # answer this many GETs with 503 first
+        self.require_headers = {k.lower(): v for k, v in (require_headers or {}).items()}  # else 403
+        self.redirect_to = redirect_to  # answer every GET with a 302 to this URL
+        self.seen_headers: list[dict[str, str]] = []  # lower-cased request headers, one dict per GET
         self.requests: list[tuple[str, str | None]] = []  # (method, Range header)
         self._lock = threading.Lock()
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
@@ -78,6 +83,18 @@ class RangeServer:
                 rng = self.headers.get("Range")
                 with server._lock:
                     server.requests.append(("GET", rng))
+                    server.seen_headers.append({k.lower(): v for k, v in self.headers.items()})
+                    if server.redirect_to:
+                        self.send_response(302)
+                        self.send_header("Location", server.redirect_to)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
+                    if any(self.headers.get(k) != v for k, v in server.require_headers.items()):
+                        self.send_response(403)
+                        self.send_header("Content-Length", "0")
+                        self.end_headers()
+                        return
                     if server.fail_first > 0:
                         server.fail_first -= 1
                         self.send_response(503)
